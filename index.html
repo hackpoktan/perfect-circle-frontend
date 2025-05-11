@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>원 따라 그리기 게임</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="google-adsense-account" content="ca-pub-4970577540806572" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      body {
+        font-family: "Noto Sans KR", sans-serif;
+        background: #f7f9fc;
+        color: #333;
+        text-align: center;
+        margin: 0;
+        padding: 0;
+      }
+
+      input[type="text"] {
+        padding: 10px;
+        font-size: 16px;
+        border: 1px solid #bbb;
+        border-radius: 6px;
+        width: 200px;
+        margin-top: 10px;
+      }
+
+      button {
+        padding: 12px 20px;
+        font-size: 16px;
+        margin-top: 10px;
+        border: none;
+        border-radius: 8px;
+        background-color: #4caf50;
+        color: white;
+        cursor: pointer;
+        transition: background 0.3s ease;
+      }
+      button:hover {
+        background-color: #43a047;
+      }
+
+      canvas {
+        width: 80vw;
+        height: 80vw;
+        max-width: 300px;
+        max-height: 300px;
+        border: 2px solid #ccc;
+        border-radius: 10px;
+        background: white;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      }
+
+      #timer {
+        font-size: 24px;
+        margin-top: 10px;
+        font-weight: bold;
+        color: #ff5722;
+      }
+
+      #resultBox {
+        margin-top: 20px;
+        background: #fff;
+        padding: 20px;
+        border-radius: 12px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+      }
+
+      #rankingBox {
+        margin-top: 30px;
+      }
+
+      #rankingList {
+        list-style: none;
+        padding: 0;
+        max-width: 320px;
+        margin: 0 auto;
+        text-align: left;
+      }
+      #rankingList li {
+        padding: 8px 12px;
+        margin: 4px 0;
+        border-bottom: 1px solid #ddd;
+        font-size: 16px;
+      }
+
+      #myRankText {
+        margin-top: 12px;
+        font-weight: bold;
+        color: #e91e63;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="nicknameScreen">
+      <h2>닉네임을 입력하세요</h2>
+      <input type="text" id="nickname" placeholder="닉네임 입력" />
+      <br />
+      <button onclick="startGame()">게임 시작</button>
+    </div>
+
+    <div id="gameScreen">
+      <h2>원을 따라 그려보세요!</h2>
+      <canvas id="gameCanvas" width="400" height="400"></canvas>
+      <div id="timer">남은 시간: 1.00초</div>
+      <div id="resultBox" style="display: none">
+        <h2>결과</h2>
+        <p id="resultText"></p>
+        <button onclick="shareResult()">공유</button>
+        <button onclick="downloadCapture()">다운로드</button>
+        <button onclick="restartGame()">다시하기</button>
+        <div id="rankingBox">
+          <h3>랭킹</h3>
+          <ul id="rankingList"></ul>
+          <p id="myRankText"></p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Firebase SDK: 앱과 데이터베이스만 로드 -->
+    <!-- script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/11.6.1/firebase-database-compat.js"></script-->
+
+    <script>
+      const firebaseConfig = {
+        apiKey: "AIzaSyDCG9yJW-5NtribCsY7zG8NG0QRObIa0-U",
+        authDomain: "perfectcircle-fed1c.firebaseapp.com",
+        projectId: "perfectcircle-fed1c",
+        storageBucket: "perfectcircle-fed1c.firebasestorage.app",
+        messagingSenderId: "646346549446",
+        appId: "1:646346549446:web:8a1c2ba64b05a456d14fc7",
+        measurementId: "G-9T54PZ1XZT",
+        databaseURL: "https://perfectcircle-fed1c-default-rtdb.firebaseio.com",
+      };
+
+      //firebase.initializeApp(firebaseConfig);
+      //const database = firebase.database();
+    </script>
+
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script>
+      const nicknameScreen = document.getElementById("nicknameScreen");
+      const gameScreen = document.getElementById("gameScreen");
+      const resultBox = document.getElementById("resultBox");
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const resultText = document.getElementById("resultText");
+      const timerDisplay = document.getElementById("timer");
+      const rankingList = document.getElementById("rankingList");
+      const myRankText = document.getElementById("myRankText");
+
+      let drawing = false;
+      let path = [];
+      let timer = null;
+      let countdown = null;
+      let remaining = 1000;
+      let finished = false;
+
+      function showScreen(screen) {
+        nicknameScreen.style.display = "none";
+        gameScreen.style.display = "none";
+        screen.style.display = "block";
+      }
+
+      async function sendPathToServer(path, nickname) {
+        try {
+          const response = await fetch("http://localhost:3000/submit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nickname, path }),
+          });
+          const data = await response.json();
+          return { accuracy: data.accuracy, id: data.id };
+        } catch (err) {
+          alert("서버 전송 실패");
+          return null;
+        }
+      }
+
+      function startTimer() {
+        if (timer) clearTimeout(timer);
+        if (countdown) clearInterval(countdown);
+
+        remaining = 1000;
+        timerDisplay.textContent = `남은 시간: ${(remaining / 1000).toFixed(
+          2
+        )}초`;
+
+        countdown = setInterval(() => {
+          remaining -= 50;
+          if (remaining <= 0) {
+            clearInterval(countdown);
+            timerDisplay.textContent = "시간 종료";
+          } else {
+            timerDisplay.textContent = `남은 시간: ${(remaining / 1000).toFixed(
+              2
+            )}초`;
+          }
+        }, 50);
+
+        timer = setTimeout(() => {
+          drawing = false;
+          stopTimersAndEnd();
+        }, 1000);
+      }
+
+      function startGame() {
+        const nickname = document.getElementById("nickname").value.trim();
+        if (!nickname) {
+          alert("닉네임을 입력해주세요.");
+          return;
+        }
+        localStorage.setItem("nickname", nickname);
+        showScreen(gameScreen);
+        drawCircle();
+        resultBox.style.display = "none";
+        timerDisplay.textContent = "남은 시간: 1.00초";
+        finished = false;
+      }
+
+      function drawCircle() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.strokeStyle = "#ccc";
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.arc(200, 200, 100, 0, 2 * Math.PI);
+        ctx.stroke();
+      }
+
+      function stopTimersAndEnd() {
+        if (timer) clearTimeout(timer);
+        if (countdown) clearInterval(countdown);
+        timerDisplay.textContent = "시간 종료";
+        endGame();
+      }
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (finished) {
+          path = [];
+          drawCircle();
+          resultBox.style.display = "none";
+          timerDisplay.textContent = "남은 시간: 1.00초";
+          finished = false;
+        }
+        drawing = true;
+        path = [];
+        ctx.strokeStyle = "blue";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+
+        ctx.moveTo(x, y);
+        path.push({ x, y });
+
+        startTimer();
+      });
+
+      canvas.addEventListener("mouseup", () => {
+        if (drawing) {
+          drawing = false;
+          stopTimersAndEnd();
+        }
+      });
+
+      canvas.addEventListener("mouseout", () => {
+        if (drawing) {
+          drawing = false;
+          stopTimersAndEnd();
+        }
+      });
+
+      canvas.addEventListener("mousemove", (e) => {
+        if (!drawing || finished) return;
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+
+        path.push({ x, y });
+        ctx.lineTo(x, y);
+        ctx.stroke();
+      });
+
+      canvas.addEventListener(
+        "touchstart",
+        (e) => {
+          if (finished) {
+            drawCircle();
+            resultBox.style.display = "none";
+            timerDisplay.textContent = "남은 시간: 1.00초";
+            finished = false;
+          }
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const touch = e.touches[0];
+          const x = (touch.clientX - rect.left) * scaleX;
+          const y = (touch.clientY - rect.top) * scaleY;
+
+          drawing = true;
+          path = [];
+          ctx.strokeStyle = "blue";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(x, y);
+          path.push({ x, y });
+
+          startTimer();
+          e.preventDefault();
+        },
+        { passive: false }
+      );
+
+      canvas.addEventListener(
+        "touchmove",
+        (e) => {
+          if (!drawing || finished) return;
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const touch = e.touches[0];
+          const x = (touch.clientX - rect.left) * scaleX;
+          const y = (touch.clientY - rect.top) * scaleY;
+
+          path.push({ x, y });
+          ctx.lineTo(x, y);
+          ctx.stroke();
+          e.preventDefault();
+        },
+        { passive: false }
+      );
+
+      canvas.addEventListener("touchend", () => {
+        if (drawing) {
+          drawing = false;
+          stopTimersAndEnd();
+        }
+      });
+
+      async function endGame() {
+        finished = true;
+
+        const nickname = localStorage.getItem("nickname") || "익명";
+
+        // ❶ 너무 짧게 그렸을 경우 예외 처리
+        if (path.length < 10) {
+          resultText.textContent = "원으로 인식할 수 없습니다.";
+          resultBox.style.display = "block";
+          myRankText.textContent = "순위를 표시할 수 없습니다.";
+          await fetchRankings(nickname, accuracy);
+          // 랭킹;
+
+          return;
+        }
+
+        // ❷ 정상적으로 원을 그림 → 정확도 계산
+
+        const result = await sendPathToServer(path, nickname);
+        if (!result) return;
+
+        const { accuracy, id } = result;
+        resultText.textContent = `정확도: ${accuracy}%`;
+        resultBox.style.display = "block";
+        await fetchRankingsById(id);
+      }
+
+      async function fetchRankingsById(myId) {
+        const res = await fetch("http://localhost:3000/rankings");
+        const data = await res.json();
+        rankingList.innerHTML = "";
+
+        const top10 = data.slice(0, 10);
+        top10.forEach((entry, idx) => {
+          const li = document.createElement("li");
+          li.textContent = `${idx + 1}위: ${entry.nickname} - ${entry.score}%`;
+          rankingList.appendChild(li);
+        });
+
+        const myRank = data.findIndex((r) => r.id === myId);
+        if (myRank >= 0) {
+          const me = data[myRank];
+          myRankText.textContent = `내 순위: ${myRank + 1}위 (${
+            me.nickname
+          } - ${me.score}%)`;
+        } else {
+          myRankText.textContent = "내 순위를 찾을 수 없습니다.";
+        }
+      }
+
+      function shareResult() {
+        const url = window.location.href;
+        navigator.clipboard.writeText(url).then(() => {
+          alert("게임 링크가 복사되었습니다! 친구에게 공유해보세요.");
+        });
+      }
+
+      function downloadCapture() {
+        html2canvas(document.body).then((canvas) => {
+          const link = document.createElement("a");
+          link.download = "result.png";
+          link.href = canvas.toDataURL("image/png");
+          link.click();
+        });
+      }
+
+      function restartGame() {
+        path = [];
+        drawCircle();
+        resultBox.style.display = "none";
+        timerDisplay.textContent = "남은 시간: 1.00초";
+        finished = false;
+      }
+
+      showScreen(nicknameScreen);
+    </script>
+  </body>
+</html>
